@@ -1,0 +1,51 @@
+import pandas as pd
+from surprise import Dataset, Reader, SVD
+from surprise.model_selection import train_test_split
+from surprise import accuracy
+from flask import Flask, request, jsonify
+
+# Load your movie ratings dataset (userId, movieId, rating)
+ratings_df = pd.read_csv('ratings.csv')
+
+# Define the format for Surprise library
+reader = Reader(rating_scale=(0.5, 5.0))
+data = Dataset.load_from_df(ratings_df[['userId', 'movieId', 'rating']], reader)
+
+# Train/test split
+trainset, testset = train_test_split(data, test_size=0.2)
+
+# Build a collaborative filtering model (SVD)
+model = SVD()
+model.fit(trainset)
+
+# Predict on testset and evaluate
+predictions = model.test(testset)
+print("RMSE:", accuracy.rmse(predictions))
+
+# Simple function to get top N recommendations for a user
+def get_top_n_recommendations(user_id, n=5):
+    # Get list of all movie IDs
+    all_movie_ids = ratings_df['movieId'].unique()
+    # Get movies the user has already rated
+    rated_movie_ids = ratings_df[ratings_df['userId'] == user_id]['movieId'].values
+    # Predict ratings for unrated movies
+    predictions = [
+        (movie_id, model.predict(user_id, movie_id).est)
+        for movie_id in all_movie_ids if movie_id not in rated_movie_ids
+    ]
+    # Sort by estimated rating
+    predictions.sort(key=lambda x: x[1], reverse=True)
+    # Return top N movie IDs
+    return [movie_id for (movie_id, _) in predictions[:n]]
+
+# Optional: Create a simple API with Flask
+app = Flask(__name__)
+
+@app.route('/recommend', methods=['GET'])
+def recommend():
+    user_id = int(request.args.get('user_id'))
+    recommendations = get_top_n_recommendations(user_id)
+    return jsonify({'user_id': user_id, 'recommended_movie_ids': recommendations})
+
+if __name__ == '__main__':
+    app.run(debug=True)
